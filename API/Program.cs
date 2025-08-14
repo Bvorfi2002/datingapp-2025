@@ -1,10 +1,12 @@
 using System.Text;
 using API.Data;
+using API.Entities;
 using API.Helpers;
 using API.Interfaces;
 using API.Middleware;
 using API.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -25,25 +27,38 @@ builder.Services.AddScoped<LogUserActivity>();
 builder.Services.AddScoped<ILikesRepository, LikesRepository>();
 builder.Services.AddScoped<IMessageRepository, MessageRepository>();
 builder.Services.Configure<CloudinarySettings>(builder.Configuration.GetSection("CloudinarySettings"));
+builder.Services.AddIdentityCore<AppUser>(opt =>
+{
+  opt.Password.RequireNonAlphanumeric = false;
+  opt.User.RequireUniqueEmail = true;
+})
+.AddRoles<IdentityRole>()
+.AddEntityFrameworkStores<AppDbContext>();
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 .AddJwtBearer(options =>
 {
   var tokenKey = builder.Configuration["TokenKey"] ?? throw new Exception("Cannot get token key - Program.cs");
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(tokenKey)),
-        ValidateIssuer = false,
-        ValidateAudience = false
-    };
+  options.TokenValidationParameters = new TokenValidationParameters
+  {
+    ValidateIssuerSigningKey = true,
+    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(tokenKey)),
+    ValidateIssuer = false,
+    ValidateAudience = false
+  };
 });
 
+builder.Services.AddAuthorizationBuilder()
+   .AddPolicy("RequireAdminRole", policy => policy.RequireRole("Admin"))
+   .AddPolicy("ModeratePhotoRole", policy => policy.RequireRole("Admin", "Moderator"));
+   
 
 var app = builder.Build();
 
 app.UseMiddleware<ExceptionMiddleware>();
 app.UseCors(x => x.AllowAnyHeader()
     .AllowAnyMethod()
+    .AllowCredentials()
     .WithOrigins("http://localhost:4200", "https://localhost:4200"));
 
 app.UseAuthentication();
@@ -56,8 +71,9 @@ var services = scope.ServiceProvider;
 try
 {
   var context = services.GetRequiredService<AppDbContext>();
+  var userManager = services.GetRequiredService<UserManager<AppUser>>();
   await context.Database.MigrateAsync();
-  await Seed.SeedUsers(context);
+  await Seed.SeedUsers(userManager);
 }
 catch (Exception ex)
 {
