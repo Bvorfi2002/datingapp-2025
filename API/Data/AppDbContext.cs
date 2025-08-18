@@ -13,6 +13,8 @@ namespace API.Data
         public DbSet<Photo> Photos { get; set; }
         public DbSet<MemberLike> Likes { get; set; }
         public DbSet<Message> Messages { get; set; }
+        public DbSet<Group> Groups { get; set; }
+        public DbSet<Connection> Connections { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -34,7 +36,7 @@ namespace API.Data
                 .HasOne(x => x.Sender)
                 .WithMany(m => m.MessagesSent)
                 .OnDelete(DeleteBehavior.Restrict);
-            
+
 
             modelBuilder.Entity<MemberLike>().HasKey(x => new { x.SourceMemberId, x.TargetMemberId });
 
@@ -67,8 +69,8 @@ namespace API.Data
                     if (property.ClrType == typeof(DateTime))
                     {
                         property.SetValueConverter(dateTimeConverter);
-                    } 
-                    else if (property.ClrType == typeof(DateTime?) )
+                    }
+                    else if (property.ClrType == typeof(DateTime?))
                     {
                         property.SetValueConverter(nullabledateTimeConverter);
                     }

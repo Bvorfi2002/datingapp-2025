@@ -1,9 +1,11 @@
-import { inject, Injectable } from '@angular/core';
+import { inject, Injectable, signal } from '@angular/core';
 import { environment } from '../../environments/environment';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { PaginatedResult } from '../../types/pagination';
 import { Message } from '../../types/message';
 import { Member } from '../../types/member';
+import { AccountService } from './account-service';
+import { HubConnection, HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr';
 
 @Injectable({
   providedIn: 'root'
@@ -11,6 +13,46 @@ import { Member } from '../../types/member';
 export class MessageService {
   private baseUrl = environment.apiUrl;
   private http = inject(HttpClient);
+  private accountService = inject(AccountService);
+  private hubUrl = environment.hubUrl;
+  private hubConnection?: HubConnection;
+  messageThread = signal<Message[]>([])
+
+  createHubConnection(otherUserId: string) {
+    const currentUser = this.accountService.currentUser();
+    // Check for both the user and the token's existence before proceeding.
+    if (!currentUser?.token) {
+        console.error('Cannot create hub connection without a valid user token.');
+        return;
+    }
+    const token = currentUser.token;
+
+    this.hubConnection = new HubConnectionBuilder()
+    .withUrl(this.hubUrl + 'messages?userId='+ otherUserId,{
+      accessTokenFactory: () => token
+    })
+    .withAutomaticReconnect()
+    .build();
+
+    this.hubConnection.start().catch(error => console.log(error));
+
+    this.hubConnection.on('ReceiveMessageThread', (messages : Message[]) => {
+      this.messageThread.set(messages.map(message => ({
+          ...message,
+          currentUserSender: message.senderId !== otherUserId
+        })))
+    })
+    this.hubConnection.on('NewMessage', (message : Message) => {
+      message.currentUserSender = message.senderId === currentUser.id;
+      this.messageThread.update(messages => [...messages, message])
+    })
+  }
+
+  stopHubConnection(){
+    if(this.hubConnection?.state === HubConnectionState.Connected){
+      this.hubConnection.stop().catch(error => console.log(error))
+    }
+  }
 
   getMessages(container:string, pageNumber:number, pageSize: number){
     let params = new HttpParams();
@@ -28,12 +70,10 @@ export class MessageService {
 
   sendMessage(recipientId:string, content:string)
   {
-    return this.http.post<Message>(this.baseUrl + 'messages', {recipientId, content});
+    return this.hubConnection?.invoke<Message>('SendMessage', {recipientId, content});
   }
 
   deleteMessage(id: string){
     return this.http.delete(this.baseUrl + 'messages/'+ id);
   }
-
-  
 }
