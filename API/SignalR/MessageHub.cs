@@ -14,13 +14,9 @@ namespace API.SignalR
 {
     [Authorize]
     public class MessageHub
-    (IMessageRepository messageRepository,
-     IMemberRepository memberRepository,
+    (IUnitOfWork uow,
      IHubContext<PresenceHub> presenceHub) : Hub
     {
-         private readonly IMessageRepository _messageRepository = messageRepository;
-        private readonly IMemberRepository _memberRepository = memberRepository;
-
         public override async Task OnConnectedAsync()
         {
             var httpContext = Context.GetHttpContext();
@@ -31,7 +27,7 @@ namespace API.SignalR
             await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
             await AddToGroup(groupName);
 
-            var messages = await _messageRepository.GetMessageThread(GetUserId(), otherUser);
+            var messages = await uow.MessageRepository.GetMessageThread(GetUserId(), otherUser);
 
             await Clients.Group(groupName).SendAsync("ReceiveMessageThread", messages);
         }
@@ -39,8 +35,8 @@ namespace API.SignalR
         public async Task SendMessage(CreateMessageDto createMessageDto)
         {
             
-            var sender = await _memberRepository.GetMemberByIdAsync(GetUserId());
-            var recipient = await _memberRepository.GetMemberByIdAsync(createMessageDto.RecipientId);
+            var sender = await uow.MemberRepository.GetMemberByIdAsync(GetUserId());
+            var recipient = await uow.MemberRepository.GetMemberByIdAsync(createMessageDto.RecipientId);
 
             if (recipient == null || sender == null || sender.Id == createMessageDto.RecipientId)
             {
@@ -55,16 +51,16 @@ namespace API.SignalR
             };
 
             var groupName = GetGroupName(sender.Id, recipient.Id);
-            var group = await _messageRepository.GetMessageGroup(groupName);
+            var group = await uow.MessageRepository.GetMessageGroup(groupName);
             var userInGroup = group != null && group.Connections.Any(x => x.UserId == message.RecipientId);
             if (userInGroup)
             {
                 message.DateRead = DateTime.UtcNow;
             }
 
-            _messageRepository.AddMessage(message);
+            uow.MessageRepository.AddMessage(message);
 
-            if (await _messageRepository.SaveAllAsync())
+            if (await uow.Complete())
             {
                 await Clients.Group(groupName).SendAsync("NewMessage", message.ToDto());
                 var connections = await PresenceTracker.GetConnectionsForUser(recipient.Id);
@@ -79,23 +75,23 @@ namespace API.SignalR
 
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
-            await _messageRepository.RemoveConnection(Context.ConnectionId);
+            await uow.MessageRepository.RemoveConnection(Context.ConnectionId);
             await base.OnDisconnectedAsync(exception);
         }
 
         private async Task<bool> AddToGroup(string groupName)
         {
-            var group = await _messageRepository.GetMessageGroup(groupName);
+            var group = await uow.MessageRepository.GetMessageGroup(groupName);
             var conneection = new Connection(Context.ConnectionId, GetUserId());
 
             if (group == null)
             {
                 group = new Group(groupName);
-                _messageRepository.AddGroup(group);
+                uow.MessageRepository.AddGroup(group);
             }
 
             group.Connections.Add(conneection);
-            return await _messageRepository.SaveAllAsync();
+            return await uow.Complete();
         }
 
         private static string GetGroupName(string? caller, string? other)
