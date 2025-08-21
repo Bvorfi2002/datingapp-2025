@@ -1,7 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using API.DTOs;
 using API.Entities;
 using API.Extensions;
@@ -10,100 +7,95 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Primitives;
 
-namespace API.SignalR
+namespace API.SignalR;
+
+[Authorize]
+public class MessageHub(IUnitOfWork uow, IHubContext<PresenceHub> presenceHub) : Hub
 {
-    [Authorize]
-    public class MessageHub
-    (IUnitOfWork uow,
-     IHubContext<PresenceHub> presenceHub) : Hub
+    public override async Task OnConnectedAsync()
     {
-        public override async Task OnConnectedAsync()
+        var httpContext = Context.GetHttpContext();
+        var otherUser = httpContext?.Request?.Query["userId"].ToString()
+            ?? throw new HubException("Other user not found");
+        var groupName = GetGroupName(GetUserId(), otherUser);
+        await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+        await AddToGroup(groupName);
+
+        var messages = await uow.MessageRepository.GetMessageThread(GetUserId(), otherUser);
+
+        await Clients.Group(groupName).SendAsync("ReceiveMessageThread", messages);
+    }
+
+    public async Task SendMessage(CreateMessageDto createMessageDto)
+    {
+        var sender = await uow.MemberRepository.GetMemberByIdAsync(GetUserId());
+        var recipient = await uow.MemberRepository.GetMemberByIdAsync(createMessageDto.RecipientId);
+
+        if (recipient == null || sender == null || sender.Id == createMessageDto.RecipientId)
+            throw new HubException("Cannot send message");
+
+        var message = new Message
         {
-            var httpContext = Context.GetHttpContext();
-            var otherUser = httpContext?.Request?.Query["userId"].ToString()
-            ?? throw new HubException("Other User not found");
+            SenderId = sender.Id,
+            RecipientId = recipient.Id,
+            Content = createMessageDto.Content
+        };
 
-            var groupName = GetGroupName(GetUserId(), otherUser);
-            await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
-            await AddToGroup(groupName);
+        var groupName = GetGroupName(sender.Id, recipient.Id);
+        var group = await uow.MessageRepository.GetMessageGroup(groupName);
+        var userInGroup = group != null && group.Connections.Any(x =>
+             x.UserId == message.RecipientId);
 
-            var messages = await uow.MessageRepository.GetMessageThread(GetUserId(), otherUser);
-
-            await Clients.Group(groupName).SendAsync("ReceiveMessageThread", messages);
+        if (userInGroup)
+        {
+            message.DateRead = DateTime.UtcNow;
         }
 
-        public async Task SendMessage(CreateMessageDto createMessageDto)
+        uow.MessageRepository.AddMessage(message);
+
+        if (await uow.Complete())
         {
-            
-            var sender = await uow.MemberRepository.GetMemberByIdAsync(GetUserId());
-            var recipient = await uow.MemberRepository.GetMemberByIdAsync(createMessageDto.RecipientId);
-
-            if (recipient == null || sender == null || sender.Id == createMessageDto.RecipientId)
+            await Clients.Group(groupName).SendAsync("NewMessage", message.ToDto());
+            var connections = await PresenceTracker.GetConnectionsForUser(recipient.Id);
+            if (connections != null && connections.Count > 0 && !userInGroup)
             {
-                throw new HubException("Cannot send message");
-            }
-
-            var message = new Message
-            {
-                SenderId = sender.Id,
-                RecipientId = recipient.Id,
-                Content = createMessageDto.Content
-            };
-
-            var groupName = GetGroupName(sender.Id, recipient.Id);
-            var group = await uow.MessageRepository.GetMessageGroup(groupName);
-            var userInGroup = group != null && group.Connections.Any(x => x.UserId == message.RecipientId);
-            if (userInGroup)
-            {
-                message.DateRead = DateTime.UtcNow;
-            }
-
-            uow.MessageRepository.AddMessage(message);
-
-            if (await uow.Complete())
-            {
-                await Clients.Group(groupName).SendAsync("NewMessage", message.ToDto());
-                var connections = await PresenceTracker.GetConnectionsForUser(recipient.Id);
-                if (connections != null && connections.Count > 0 && !userInGroup)
-                {
-                    await presenceHub.Clients.Clients(connections)
+                await presenceHub.Clients.Clients(connections)
                     .SendAsync("NewMessageReceived", message.ToDto());
-
-                }
             }
         }
+    }
 
-        public override async Task OnDisconnectedAsync(Exception? exception)
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        await uow.MessageRepository.RemoveConnection(Context.ConnectionId);
+        await base.OnDisconnectedAsync(exception);
+    }
+
+    private async Task<bool> AddToGroup(string groupName)
+    {
+        var group = await uow.MessageRepository.GetMessageGroup(groupName);
+        var connection = new Connection(Context.ConnectionId, GetUserId());
+
+        if (group == null)
         {
-            await uow.MessageRepository.RemoveConnection(Context.ConnectionId);
-            await base.OnDisconnectedAsync(exception);
+            group = new Group(groupName);
+            uow.MessageRepository.AddGroup(group);
         }
 
-        private async Task<bool> AddToGroup(string groupName)
-        {
-            var group = await uow.MessageRepository.GetMessageGroup(groupName);
-            var conneection = new Connection(Context.ConnectionId, GetUserId());
+        group.Connections.Add(connection);
 
-            if (group == null)
-            {
-                group = new Group(groupName);
-                uow.MessageRepository.AddGroup(group);
-            }
+        return await uow.Complete();
+    }
 
-            group.Connections.Add(conneection);
-            return await uow.Complete();
-        }
+    private static string GetGroupName(string? caller, string? other)
+    {
+        var stringCompare = string.CompareOrdinal(caller, other) < 0;
+        return stringCompare ? $"{caller}-{other}" : $"{other}-{caller}";
+    }
 
-        private static string GetGroupName(string? caller, string? other)
-        {
-            var stringCompare = string.CompareOrdinal(caller, other) < 0;
-            return stringCompare ? $"{caller}-{other}" : $"{other}-{caller}";
-        }
-
-        private string GetUserId()
-        {
-            return Context.User?.GetMemberId()
-            ?? throw new HubException("Cannot get memberId");
-        }
+    private string GetUserId()
+    {
+        return Context.User?.GetMemberId()
+            ?? throw new HubException("Cannot get member id");
     }
 }
