@@ -11,32 +11,29 @@ export class CountdownComponent implements OnInit, OnDestroy {
   @Input() duration: number = 180; // default 3 minutes
   @Output() finished = new EventEmitter<void>();
 
-  timeLeft!: number;
-  private intervalId: any;
+  timeLeft: number;
+  private intervalId: number | null = null;
 
-  // Inject NgZone to manually control change detection
-  constructor(private zone: NgZone) {}
+  constructor(private zone: NgZone) {
+    this.timeLeft = this.duration;
+  }
 
   ngOnInit(): void {
     this.start();
   }
 
+  ngOnDestroy(): void {
+    this.stop();
+  }
+
   start(): void {
-    // Stop any existing timer before starting a new one
     this.stop();
     this.timeLeft = this.duration;
 
-    // Run the interval outside of Angular's zone to prevent unnecessary change detection cycles on every tick
     this.zone.runOutsideAngular(() => {
-      this.intervalId = setInterval(() => {
-        // Run the update logic back inside Angular's zone
+      this.intervalId = window.setInterval(() => {
         this.zone.run(() => {
-          if (this.timeLeft > 0) {
-            this.timeLeft--;
-          } else {
-            this.stop();
-            this.finished.emit();
-          }
+          this.handleTick();
         });
       }, 1000);
     });
@@ -44,20 +41,22 @@ export class CountdownComponent implements OnInit, OnDestroy {
 
   stop(): void {
     if (this.intervalId) {
-      clearInterval(this.intervalId);
+      window.clearInterval(this.intervalId);
       this.intervalId = null;
     }
   }
 
-  ngOnDestroy(): void {
-    this.stop();
-  }
-
-  // This formatting logic remains the same as it was already correct
-  get formattedTime(): string {
-    if (this.timeLeft === undefined || this.timeLeft < 0) {
-        return '0:00';
+  private handleTick(): void {
+    if (this.timeLeft > 0) {
+      this.timeLeft--;
+    } else {
+      this.timeLeft = 0;
+      this.stop();
+      this.finished.emit();
     }
+  }
+
+  get formattedTime(): string {
     const minutes = Math.floor(this.timeLeft / 60);
     const seconds = this.timeLeft % 60;
     return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
