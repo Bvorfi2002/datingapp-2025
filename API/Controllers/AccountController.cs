@@ -13,16 +13,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace API.Controllers;
 
-public class AccountController(UserManager<AppUser> userManager, ITokenService tokenService) : BaseApiController
+public class AccountController(UserManager<AppUser> userManager, ITokenService tokenService, IEmailVerificationService emailVerification, IEmailService emailService, ISmsService smsService) : BaseApiController
 {
     [HttpPost("register")]// api/account/register
     public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
     {
+
+         var isEmailValid = await emailVerification.IsEmailValidAsync(registerDto.Email);
+        if (!isEmailValid)
+        {
+            return BadRequest("The provided email address is not valid or could not be verified.");
+        }
+
         var user = new AppUser
         {
             DisplayName = registerDto.DisplayName,
             Email = registerDto.Email,
             UserName = registerDto.Email,
+            PhoneNumber = registerDto.PhoneNumber, 
 
             Member = new Member
             {
@@ -48,11 +56,107 @@ public class AccountController(UserManager<AppUser> userManager, ITokenService t
 
         await userManager.AddToRoleAsync(user, "Member");
 
+        await SendConfirmationEmailAsync(user, "Confirm Your Email", "<h1>Welcome to our App!</h1>");
+        
+        return Ok(await user.ToDto(tokenService));
+    }
+
+    [HttpPost("confirm-email")]
+    public async Task<ActionResult> ConfirmEmail(ConfirmationEmailDto confirmEmailDto)
+    {
+        var user = await userManager.FindByEmailAsync(confirmEmailDto.Email!);
+        if (user == null) return Unauthorized("Invalid email or confirmation code.");
+        if (user.EmailConfirmed) return BadRequest("This email has already been confirmed.");
+
+        if (user.EmailConfirmationCode != confirmEmailDto.Code || user.EmailConfirmationCodeExpiry <= DateTime.UtcNow)
+        {
+            return Unauthorized("Invalid or expired confirmation code.");
+        }
+
+        user.EmailConfirmed = true;
+        user.EmailConfirmationCode = null;
+        user.EmailConfirmationCodeExpiry = null;
+        
+        var smsCode = RandomNumberGenerator.GetInt32(100000, 999999).ToString();
+        user.SmsConfirmationCode = smsCode;
+        user.SmsConfirmationCodeExpiry = DateTime.UtcNow.AddMinutes(3);
+        await userManager.UpdateAsync(user);
+
+        var smsMessage = $"Your verification code is: {smsCode}";
+        await smsService.SendSmsAsync(user.PhoneNumber!, smsMessage);
+
+        return Ok(new { message = "Email confirmed. Please check your phone for an SMS verification code." });
+    }
+
+    [HttpPost("confirm-phone")]
+    public async Task<ActionResult<UserDto>> ConfirmPhone(ConfirmPhoneDto confirmPhoneDto)
+    {
+        var user = await userManager.FindByEmailAsync(confirmPhoneDto.Email!);
+        if (user == null) return Unauthorized("Invalid email or code.");
+
+        // Ensure steps are done in order
+        if (!user.EmailConfirmed) return BadRequest("Please confirm your email address first.");
+        if (user.PhoneNumberConfirmed) return BadRequest("This phone number has already been confirmed.");
+
+        if (user.SmsConfirmationCode != confirmPhoneDto.Code || user.SmsConfirmationCodeExpiry <= DateTime.UtcNow)
+        {
+            return Unauthorized("Invalid or expired SMS code.");
+        }
+
+        user.PhoneNumberConfirmed = true;
+        user.SmsConfirmationCode = null;
+        user.SmsConfirmationCodeExpiry = null;
+        await userManager.UpdateAsync(user);
+
         await SetRefreshTokenCookie(user);
-
-
         return await user.ToDto(tokenService);
     }
+
+    [HttpPost("resend-confirmation-code")]
+public async Task<ActionResult> ResendConfirmationCode([FromBody] string email)
+{
+    var user = await userManager.FindByEmailAsync(email);
+
+    if (user == null)
+    {
+        return Ok(new { message = "If an account with this email exists, a new confirmation code has been sent." });
+    }
+    if (user.EmailConfirmed && !user.PhoneNumberConfirmed)
+    {
+        var smsCode = RandomNumberGenerator.GetInt32(100000, 999999).ToString();
+        user.SmsConfirmationCode = smsCode;
+        user.SmsConfirmationCodeExpiry = DateTime.UtcNow.AddMinutes(3);
+
+        await userManager.UpdateAsync(user);
+
+        var smsMessage = $"Your new verification code is: {smsCode}";
+        await smsService.SendSmsAsync(user.PhoneNumber!, smsMessage);
+
+        return Ok(new { message = "A new phone confirmation code has been sent." });
+    }
+    if (!user.EmailConfirmed)
+    {
+        await SendConfirmationEmailAsync(user, "New Confirmation Code", "<h1>New Confirmation Code</h1>");
+        return Ok(new { message = "A new email confirmation code has been sent." });
+    }
+    return BadRequest(new { message = "This account is already fully confirmed." });
+}
+
+
+    private async Task SendConfirmationEmailAsync(AppUser user, string subject, string title)
+    {
+        // Generate 6-digit code
+        var confirmationCode = RandomNumberGenerator.GetInt32(100000, 999999).ToString();
+        user.EmailConfirmationCode = confirmationCode;
+        user.EmailConfirmationCodeExpiry = DateTime.UtcNow.AddMinutes(3); // Code is valid for 15 minutes
+        await userManager.UpdateAsync(user);
+
+        // Send the email
+        var emailBody = $"{title}<p>Your email confirmation code is: <strong>{confirmationCode}</strong></p>";
+        await emailService.SendEmailAsync(user.Email!, subject, emailBody);
+    }
+
+
 
     [HttpPost("login")]// api/account/login
     public async Task<ActionResult<UserDto>> Login(LoginDto loginDto)

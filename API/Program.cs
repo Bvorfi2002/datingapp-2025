@@ -23,6 +23,12 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
 builder.Services.AddCors();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IPhotoService, PhotoService>();
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<IEmailVerificationService, EmailVerificationService>();
+builder.Services.Configure<SmtpSettings>(builder.Configuration.GetSection("SmtpSettings"));
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.Configure<SmsGatewaySettings>(builder.Configuration.GetSection("SmsGatewaySettings"));
+builder.Services.AddScoped<ISmsService, SmsService>();
 builder.Services.AddScoped<LogUserActivity>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 

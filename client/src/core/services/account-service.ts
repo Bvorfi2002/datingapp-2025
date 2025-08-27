@@ -23,13 +23,37 @@ export class AccountService {
        {withCredentials:true}).pipe(
       tap(user => {
         if (user) {
-          this.setCurrentUser(user);
+          // this.setCurrentUser(user);
           this.starTokenRefreshInterval();
         }
       })
     )
 
   }
+
+  confirmEmail(email: string, code: string) {
+  return this.http.post(this.baseUrl + 'account/confirm-email',
+    { email, code },
+    { withCredentials: true }
+  );
+}
+
+confirmPhone(email: string, code: string) {
+  return this.http.post<User>(this.baseUrl + 'account/confirm-phone',
+    { email, code },
+    { withCredentials: true }
+  );
+}
+
+resendConfirmationCode(email: string) {
+  return this.http.post(this.baseUrl + 'account/resend-confirmation-code', 
+    JSON.stringify(email), 
+    {
+      headers: { 'Content-Type': 'application/json' },
+      withCredentials: true
+    }
+  );
+}
 
   login(creds: LoginCreds) {
     return this.http.post<User>(this.baseUrl + 'account/login', creds,
