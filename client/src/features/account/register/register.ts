@@ -123,8 +123,6 @@ export class Register {
 
   submitProfile() {
     if (this.profileForm.valid && this.credentialsForm.valid) {
-      // --- START: FIX ---
-      // Manually create the payload object to exclude confirmPassword
       const creds = this.credentialsForm.value;
       const profile = this.profileForm.value;
 
@@ -138,8 +136,6 @@ export class Register {
         city: profile.city,
         country: profile.country,
       };
-      // --- END: FIX ---
-
       this.registeredEmail = registerPayload.email;
 
       this.accountService.register(registerPayload).subscribe({
@@ -149,7 +145,6 @@ export class Register {
         },
         error: (err) => {
           this.validationErrors.set(err.error.errors || ['Registration failed. Please try again.']);
-          this.toast.warning('Please check the form for errors.');
         }
       });
     }

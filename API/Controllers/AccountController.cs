@@ -19,12 +19,13 @@ public class AccountController(UserManager<AppUser> userManager, ITokenService t
     public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
     {
 
-        if (string.IsNullOrWhiteSpace(registerDto.Email))
-    {
-        return BadRequest("Email address cannot be empty.");
-    }
+        if (registerDto == null || string.IsNullOrWhiteSpace(registerDto.Email))
+        {
+            return BadRequest("Email address is required and cannot be empty.");
+        }
+        //
 
-         var isEmailValid = await emailVerification.IsEmailValidAsync(registerDto.Email);
+        var isEmailValid = await emailVerification.IsEmailValidAsync(registerDto.Email);
         if (!isEmailValid)
         {
             return BadRequest("The provided email address is not valid or could not be verified.");
@@ -35,7 +36,7 @@ public class AccountController(UserManager<AppUser> userManager, ITokenService t
             DisplayName = registerDto.DisplayName,
             Email = registerDto.Email,
             UserName = registerDto.Email,
-            PhoneNumber = registerDto.PhoneNumber, 
+            PhoneNumber = registerDto.PhoneNumber,
 
             Member = new Member
             {
@@ -62,7 +63,7 @@ public class AccountController(UserManager<AppUser> userManager, ITokenService t
         await userManager.AddToRoleAsync(user, "Member");
 
         await SendConfirmationEmailAsync(user, "Confirm Your Email", "<h1>Welcome to our App!</h1>");
-        
+
         return Ok(await user.ToDto(tokenService));
     }
 
@@ -81,7 +82,7 @@ public class AccountController(UserManager<AppUser> userManager, ITokenService t
         user.EmailConfirmed = true;
         user.EmailConfirmationCode = null;
         user.EmailConfirmationCodeExpiry = null;
-        
+
         var smsCode = RandomNumberGenerator.GetInt32(100000, 999999).ToString();
         user.SmsConfirmationCode = smsCode;
         user.SmsConfirmationCodeExpiry = DateTime.UtcNow.AddMinutes(3);
@@ -118,34 +119,34 @@ public class AccountController(UserManager<AppUser> userManager, ITokenService t
     }
 
     [HttpPost("resend-confirmation-code")]
-public async Task<ActionResult> ResendConfirmationCode([FromBody] string email)
-{
-    var user = await userManager.FindByEmailAsync(email);
-
-    if (user == null)
+    public async Task<ActionResult> ResendConfirmationCode([FromBody] string email)
     {
-        return Ok(new { message = "If an account with this email exists, a new confirmation code has been sent." });
-    }
-    if (user.EmailConfirmed && !user.PhoneNumberConfirmed)
-    {
-        var smsCode = RandomNumberGenerator.GetInt32(100000, 999999).ToString();
-        user.SmsConfirmationCode = smsCode;
-        user.SmsConfirmationCodeExpiry = DateTime.UtcNow.AddMinutes(3);
+        var user = await userManager.FindByEmailAsync(email);
 
-        await userManager.UpdateAsync(user);
+        if (user == null)
+        {
+            return Ok(new { message = "If an account with this email exists, a new confirmation code has been sent." });
+        }
+        if (user.EmailConfirmed && !user.PhoneNumberConfirmed)
+        {
+            var smsCode = RandomNumberGenerator.GetInt32(100000, 999999).ToString();
+            user.SmsConfirmationCode = smsCode;
+            user.SmsConfirmationCodeExpiry = DateTime.UtcNow.AddMinutes(3);
 
-        var smsMessage = $"Your new verification code is: {smsCode}";
-        await smsService.SendSmsAsync(user.PhoneNumber!, smsMessage);
+            await userManager.UpdateAsync(user);
 
-        return Ok(new { message = "A new phone confirmation code has been sent." });
+            var smsMessage = $"Your new verification code is: {smsCode}";
+            await smsService.SendSmsAsync(user.PhoneNumber!, smsMessage);
+
+            return Ok(new { message = "A new phone confirmation code has been sent." });
+        }
+        if (!user.EmailConfirmed)
+        {
+            await SendConfirmationEmailAsync(user, "New Confirmation Code", "<h1>New Confirmation Code</h1>");
+            return Ok(new { message = "A new email confirmation code has been sent." });
+        }
+        return BadRequest(new { message = "This account is already fully confirmed." });
     }
-    if (!user.EmailConfirmed)
-    {
-        await SendConfirmationEmailAsync(user, "New Confirmation Code", "<h1>New Confirmation Code</h1>");
-        return Ok(new { message = "A new email confirmation code has been sent." });
-    }
-    return BadRequest(new { message = "This account is already fully confirmed." });
-}
 
 
     private async Task SendConfirmationEmailAsync(AppUser user, string subject, string title)
@@ -221,6 +222,6 @@ public async Task<ActionResult> ResendConfirmationCode([FromBody] string email)
 
         Response.Cookies.Delete("refresToken");
         return Ok();
-        
+
     }
 }
