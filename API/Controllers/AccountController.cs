@@ -19,9 +19,14 @@ public class AccountController(UserManager<AppUser> userManager, ITokenService t
     public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
     {
 
-        if (registerDto == null || string.IsNullOrWhiteSpace(registerDto.Email))
+        if (registerDto == null)
         {
-            return BadRequest("Email address is required and cannot be empty.");
+            return BadRequest("DEBUG: The entire registration object (registerDto) is null.");
+        }
+
+        if (string.IsNullOrWhiteSpace(registerDto.Email))
+        {
+            return BadRequest($"DEBUG: The email field is null or empty. DisplayName received: '{registerDto.DisplayName}'");
         }
         //
 
