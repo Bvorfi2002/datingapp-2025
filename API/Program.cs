@@ -18,7 +18,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
-  opt.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+  opt.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"), sqlServerOptionsAction: sqlOptions =>
+  {
+    sqlOptions.EnableRetryOnFailure(
+          maxRetryCount: 5,
+          maxRetryDelay: TimeSpan.FromSeconds(30),
+          errorNumbersToAdd: null);
+  });
 });
 builder.Services.AddCors();
 builder.Services.AddScoped<ITokenService, TokenService>();
