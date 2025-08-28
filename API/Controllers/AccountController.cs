@@ -19,6 +19,11 @@ public class AccountController(UserManager<AppUser> userManager, ITokenService t
     public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
     {
 
+        if (string.IsNullOrWhiteSpace(registerDto.Email))
+    {
+        return BadRequest("Email address cannot be empty.");
+    }
+
          var isEmailValid = await emailVerification.IsEmailValidAsync(registerDto.Email);
         if (!isEmailValid)
         {

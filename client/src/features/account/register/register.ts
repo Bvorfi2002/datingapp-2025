@@ -121,21 +121,39 @@ export class Register {
     this.canResend.set(true);
   }
 
-submitProfile() {
-  if(this.profileForm.valid && this.credentialsForm.valid){
-    const formData = {...this.credentialsForm.value, ...this.profileForm.value};
-    this.registeredEmail = formData.email;
-    this.accountService.register(formData).subscribe({
-      next: (res: any) => {
-        this.currentStep.set(3);
-        this.startCountdown();
-      },
-      error: (err) => {
-        this.validationErrors.set([err.error || 'Registration failed']);
-      }
-    });
+  submitProfile() {
+    if (this.profileForm.valid && this.credentialsForm.valid) {
+      // --- START: FIX ---
+      // Manually create the payload object to exclude confirmPassword
+      const creds = this.credentialsForm.value;
+      const profile = this.profileForm.value;
+
+      const registerPayload = {
+        email: creds.email,
+        displayName: creds.displayName,
+        phoneNumber: creds.phoneNumber,
+        password: creds.password,
+        gender: profile.gender,
+        dateOfBirth: profile.dateOfBirth,
+        city: profile.city,
+        country: profile.country,
+      };
+      // --- END: FIX ---
+
+      this.registeredEmail = registerPayload.email;
+
+      this.accountService.register(registerPayload).subscribe({
+        next: () => {
+          this.currentStep.set(3);
+          this.startCountdown();
+        },
+        error: (err) => {
+          this.validationErrors.set(err.error.errors || ['Registration failed. Please try again.']);
+          this.toast.warning('Please check the form for errors.');
+        }
+      });
+    }
   }
-}
 
   confirmEmailOtp() {
   this.accountService.confirmEmail(this.registeredEmail, this.emailOtp).subscribe({
