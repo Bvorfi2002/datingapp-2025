@@ -177,6 +177,13 @@ public class AccountController(UserManager<AppUser> userManager, ITokenService t
 
         var result = await userManager.CheckPasswordAsync(user, loginDto.Password);
         if (!result) return Unauthorized("iNVALID password");
+
+        if (!user.EmailConfirmed)
+        return Unauthorized("Please confirm your email before logging in");
+
+        if (!user.PhoneNumberConfirmed)
+        return Unauthorized("Please confirm your phone number before logging in");
+
         await SetRefreshTokenCookie(user);
         return await user.ToDto(tokenService);
     }
